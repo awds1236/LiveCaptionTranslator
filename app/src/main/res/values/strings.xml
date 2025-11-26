@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Live Caption Translator</string>
+    
+    <!-- 메인 화면 -->
+    <string name="service_title">실시간 자막 서비스</string>
+    <string name="language_settings">언어 설정</string>
+    <string name="source_language">원본 언어</string>
+    <string name="target_language">번역 언어</string>
+    <string name="start">시작</string>
+    <string name="stop">중지</string>
+    <string name="settings">설정</string>
+    <string name="permission_notice">※ 앱을 사용하기 위해서는 오디오 캡처 및 오버레이 권한이 필요합니다.</string>
+    
+    <!-- 설정 화면 -->
+    <string name="subtitle_position">자막 위치</string>
+    <string name="font_size">글자 크기</string>
+    <string name="display_options">표시 옵션</string>
+    <string name="show_original">원본 텍스트 표시</string>
+    <string name="auto_detect">언어 자동 감지</string>
+    <string name="save">저장</string>
+    
+    <!-- 자막 위치 -->
+    <string name="position_top">상단</string>
+    <string name="position_center">중앙</string>
+    <string name="position_bottom">하단</string>
+    
+    <!-- 언어 -->
+    <string name="korean">한국어</string>
+    <string name="english">English</string>
+    <string name="japanese">日本語</string>
+    <string name="chinese">中文</string>
+    <string name="spanish">Español</string>
+    <string name="french">Français</string>
+    <string name="german">Deutsch</string>
+    
+    <!-- 메시지 -->
+    <string name="service_started">서비스가 시작되었습니다</string>
+    <string name="service_stopped">서비스가 중지되었습니다</string>
+    <string name="settings_saved">설정이 저장되었습니다</string>
+    <string name="overlay_permission_required">오버레이 권한이 필요합니다</string>
+    <string name="audio_permission_required">오디오 녹음 권한이 필요합니다</string>
+    <string name="capture_permission_denied">오디오 캡처 권한이 거부되었습니다</string>
+    
+    <!-- 알림 -->
+    <string name="notification_title">Live Caption Translator</string>
+    <string name="notification_text">실시간 자막이 실행 중입니다</string>
+    <string name="notification_channel_name">Live Caption Service</string>
+    <string name="notification_channel_desc">실시간 자막 서비스</string>
+</resources>
