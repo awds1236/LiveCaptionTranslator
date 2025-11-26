@@ -8,12 +8,16 @@ android {
 
     defaultConfig {
         applicationId "com.livecaption.translator"
-        minSdk 29  // Android 10 (AudioPlaybackCapture 필요)
+        minSdk 29
         targetSdk 34
         versionCode 1
         versionName "1.0"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+
+        ndk {
+            abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'
+        }
     }
 
     buildTypes {
@@ -38,6 +42,9 @@ dependencies {
 
     // Google ML Kit - 번역
     implementation 'com.google.mlkit:translate:17.0.2'
+
+    // Vosk 음성 인식 (오픈소스, 오프라인)
+    implementation 'com.alphacephei:vosk-android:0.3.47'
 
     // Google Play Services
     implementation 'com.google.android.gms:play-services-base:18.3.0'

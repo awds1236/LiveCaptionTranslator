@@ -17,6 +17,7 @@ import android.media.projection.MediaProjectionManager;
 import android.os.Build;
 import android.os.IBinder;
 import android.util.Log;
+import android.widget.Toast;
 
 import androidx.annotation.RequiresApi;
 import androidx.core.app.ActivityCompat;
@@ -27,7 +28,7 @@ public class AudioCaptureService extends Service {
     private static final String TAG = "AudioCaptureService";
     private static final String CHANNEL_ID = "AudioCaptureChannel";
     private static final int NOTIFICATION_ID = 1;
-    
+
     private static final int SAMPLE_RATE = 16000;
     private static final int CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO;
     private static final int AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT;
@@ -40,6 +41,7 @@ public class AudioCaptureService extends Service {
     private SpeechRecognitionManager speechRecognitionManager;
     private String sourceLanguage;
     private String targetLanguage;
+    private boolean isModelInitialized = false;
 
     @Override
     public void onCreate() {
@@ -58,19 +60,43 @@ public class AudioCaptureService extends Service {
 
             startForeground(NOTIFICATION_ID, createNotification());
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startAudioCapture(resultCode, data);
-            }
+            // 음성 인식 모델 초기화
+            initializeSpeechModel(() -> {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    startAudioCapture(resultCode, data);
+                }
+            });
         }
 
         return START_STICKY;
     }
 
+    private void initializeSpeechModel(Runnable onComplete) {
+        speechRecognitionManager.initializeModel(sourceLanguage,
+                new SpeechRecognitionManager.ModelInitCallback() {
+                    @Override
+                    public void onInitialized() {
+                        Log.d(TAG, "Speech model initialized successfully");
+                        isModelInitialized = true;
+                        if (onComplete != null) {
+                            onComplete.run();
+                        }
+                    }
+
+                    @Override
+                    public void onError(String error) {
+                        Log.e(TAG, "Failed to initialize speech model: " + error);
+                        showToast("음성 인식 모델 로드 실패: " + error);
+                        stopSelf();
+                    }
+                });
+    }
+
     @RequiresApi(api = Build.VERSION_CODES.Q)
     private void startAudioCapture(int resultCode, Intent data) {
         try {
-            MediaProjectionManager projectionManager = 
-                (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
+            MediaProjectionManager projectionManager =
+                    (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
             mediaProjection = projectionManager.getMediaProjection(resultCode, data);
 
             if (mediaProjection == null) {
@@ -79,38 +105,41 @@ public class AudioCaptureService extends Service {
                 return;
             }
 
-            AudioPlaybackCaptureConfiguration config = 
-                new AudioPlaybackCaptureConfiguration.Builder(mediaProjection)
-                    .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
-                    .addMatchingUsage(AudioAttributes.USAGE_GAME)
-                    .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
-                    .build();
+            AudioPlaybackCaptureConfiguration config =
+                    new AudioPlaybackCaptureConfiguration.Builder(mediaProjection)
+                            .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
+                            .addMatchingUsage(AudioAttributes.USAGE_GAME)
+                            .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
+                            .build();
 
             int bufferSize = AudioRecord.getMinBufferSize(
-                SAMPLE_RATE, 
-                CHANNEL_CONFIG, 
-                AUDIO_FORMAT
+                    SAMPLE_RATE,
+                    CHANNEL_CONFIG,
+                    AUDIO_FORMAT
             );
 
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-                // TODO: Consider calling
-                //    ActivityCompat#requestPermissions
-                // here to request the missing permissions, and then overriding
-                //   public void onRequestPermissionsResult(int requestCode, String[] permissions,
-                //                                          int[] grantResults)
-                // to handle the case where the user grants the permission. See the documentation
-                // for ActivityCompat#requestPermissions for more details.
+            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+                    != PackageManager.PERMISSION_GRANTED) {
+                Log.e(TAG, "RECORD_AUDIO permission not granted");
+                stopSelf();
                 return;
             }
+
             audioRecord = new AudioRecord.Builder()
-                .setAudioFormat(new AudioFormat.Builder()
-                    .setEncoding(AUDIO_FORMAT)
-                    .setSampleRate(SAMPLE_RATE)
-                    .setChannelMask(CHANNEL_CONFIG)
-                    .build())
-                .setBufferSizeInBytes(bufferSize)
-                .setAudioPlaybackCaptureConfig(config)
-                .build();
+                    .setAudioFormat(new AudioFormat.Builder()
+                            .setEncoding(AUDIO_FORMAT)
+                            .setSampleRate(SAMPLE_RATE)
+                            .setChannelMask(CHANNEL_CONFIG)
+                            .build())
+                    .setBufferSizeInBytes(bufferSize * 2) // 버퍼 크기 증가
+                    .setAudioPlaybackCaptureConfig(config)
+                    .build();
+
+            if (audioRecord.getState() != AudioRecord.STATE_INITIALIZED) {
+                Log.e(TAG, "AudioRecord initialization failed");
+                stopSelf();
+                return;
+            }
 
             audioRecord.startRecording();
             isCapturing = true;
@@ -121,6 +150,7 @@ public class AudioCaptureService extends Service {
 
         } catch (Exception e) {
             Log.e(TAG, "Error starting audio capture", e);
+            showToast("오디오 캡처 시작 실패");
             stopSelf();
         }
     }
@@ -128,66 +158,96 @@ public class AudioCaptureService extends Service {
     private void startAudioProcessing() {
         audioThread = new Thread(() -> {
             int bufferSize = AudioRecord.getMinBufferSize(
-                SAMPLE_RATE, 
-                CHANNEL_CONFIG, 
-                AUDIO_FORMAT
+                    SAMPLE_RATE,
+                    CHANNEL_CONFIG,
+                    AUDIO_FORMAT
             );
             byte[] audioBuffer = new byte[bufferSize];
 
-            while (isCapturing) {
+            Log.d(TAG, "Audio processing thread started");
+
+            while (isCapturing && audioRecord != null) {
                 int bytesRead = audioRecord.read(audioBuffer, 0, bufferSize);
-                
+
                 if (bytesRead > 0) {
-                    // 오디오 데이터를 Speech Recognition으로 전달
-                    processAudioData(audioBuffer, bytesRead);
+                    // 오디오 레벨 체크 (디버깅용)
+                    int sum = 0;
+                    for (int i = 0; i < bytesRead; i++) {
+                        sum += Math.abs(audioBuffer[i]);
+                    }
+                    int average = sum / bytesRead;
+
+                    if (average > 5) { // 무음이 아닌 경우만 처리
+                        // Vosk로 오디오 데이터 전달
+                        if (isModelInitialized) {
+                            processAudioData(audioBuffer, bytesRead);
+                        }
+                    }
+                } else if (bytesRead < 0) {
+                    Log.e(TAG, "Error reading audio: " + bytesRead);
+                    break;
                 }
             }
+
+            Log.d(TAG, "Audio processing thread ended");
         });
         audioThread.start();
     }
 
     private void processAudioData(byte[] audioData, int size) {
-        // 음성 인식 처리
-        speechRecognitionManager.processAudio(audioData, size, new SpeechRecognitionManager.RecognitionCallback() {
-            @Override
-            public void onTextRecognized(String text) {
-                Log.d(TAG, "Recognized text: " + text);
-                
-                // 번역 처리
-                TranslationManager.getInstance(AudioCaptureService.this)
-                    .translate(text, sourceLanguage, targetLanguage, 
-                        new TranslationManager.TranslationCallback() {
-                            @Override
-                            public void onTranslationSuccess(String translatedText) {
-                                Log.d(TAG, "Translated text: " + translatedText);
-                                
-                                // 오버레이에 자막 표시
-                                Intent broadcastIntent = new Intent("com.livecaption.translator.UPDATE_SUBTITLE");
-                                broadcastIntent.putExtra("originalText", text);
-                                broadcastIntent.putExtra("translatedText", translatedText);
-                                sendBroadcast(broadcastIntent);
-                            }
+        if (!isModelInitialized) {
+            return;
+        }
 
-                            @Override
-                            public void onTranslationError(String error) {
-                                Log.e(TAG, "Translation error: " + error);
-                            }
-                        });
-            }
+        // Vosk 음성 인식 처리
+        speechRecognitionManager.processAudio(audioData, size,
+                new SpeechRecognitionManager.RecognitionCallback() {
+                    @Override
+                    public void onTextRecognized(String text) {
+                        Log.d(TAG, "Recognized text: " + text);
 
-            @Override
-            public void onError(String error) {
-                Log.e(TAG, "Recognition error: " + error);
-            }
-        });
+                        // 번역 처리
+                        TranslationManager.getInstance(AudioCaptureService.this)
+                                .translate(text, sourceLanguage, targetLanguage,
+                                        new TranslationManager.TranslationCallback() {
+                                            @Override
+                                            public void onTranslationSuccess(String translatedText) {
+                                                Log.d(TAG, "Translated text: " + translatedText);
+
+                                                // 오버레이에 자막 표시
+                                                Intent broadcastIntent = new Intent(
+                                                        "com.livecaption.translator.UPDATE_SUBTITLE");
+                                                broadcastIntent.putExtra("originalText", text);
+                                                broadcastIntent.putExtra("translatedText", translatedText);
+                                                sendBroadcast(broadcastIntent);
+                                            }
+
+                                            @Override
+                                            public void onTranslationError(String error) {
+                                                Log.e(TAG, "Translation error: " + error);
+                                            }
+                                        });
+                    }
+
+                    @Override
+                    public void onError(String error) {
+                        Log.e(TAG, "Recognition error: " + error);
+                    }
+                });
+    }
+
+    private void showToast(final String message) {
+        new android.os.Handler(getMainLooper()).post(() ->
+                Toast.makeText(AudioCaptureService.this, message, Toast.LENGTH_SHORT).show()
+        );
     }
 
     private void createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel(
-                CHANNEL_ID,
-                "Live Caption Service",
-                NotificationManager.IMPORTANCE_LOW
+                    CHANNEL_ID,
+                    "Live Caption Service",
+                    NotificationManager.IMPORTANCE_LOW
             );
             channel.setDescription("실시간 자막 서비스");
 
@@ -201,19 +261,19 @@ public class AudioCaptureService extends Service {
     private Notification createNotification() {
         Intent notificationIntent = new Intent(this, MainActivity.class);
         PendingIntent pendingIntent = PendingIntent.getActivity(
-            this, 
-            0, 
-            notificationIntent,
-            PendingIntent.FLAG_IMMUTABLE
+                this,
+                0,
+                notificationIntent,
+                PendingIntent.FLAG_IMMUTABLE
         );
 
         return new NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Live Caption Translator")
-            .setContentText("실시간 자막이 실행 중입니다")
-            .setSmallIcon(android.R.drawable.ic_media_play)
-            .setContentIntent(pendingIntent)
-            .setOngoing(true)
-            .build();
+                .setContentTitle("Live Caption Translator")
+                .setContentText("실시간 자막이 실행 중입니다")
+                .setSmallIcon(android.R.drawable.ic_media_play)
+                .setContentIntent(pendingIntent)
+                .setOngoing(true)
+                .build();
     }
 
     @Override
@@ -235,7 +295,9 @@ public class AudioCaptureService extends Service {
 
         if (audioRecord != null) {
             try {
-                audioRecord.stop();
+                if (audioRecord.getState() == AudioRecord.STATE_INITIALIZED) {
+                    audioRecord.stop();
+                }
                 audioRecord.release();
             } catch (Exception e) {
                 Log.e(TAG, "Error releasing audio record", e);

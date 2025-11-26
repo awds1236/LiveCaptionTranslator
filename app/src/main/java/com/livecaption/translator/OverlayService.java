@@ -87,7 +87,7 @@ public class OverlayService extends Service {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(subtitleReceiver, filter, RECEIVER_NOT_EXPORTED);
         } else {
-            registerReceiver(subtitleReceiver, filter);
+            registerReceiver(subtitleReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
         }
     }
 
